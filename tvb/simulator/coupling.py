@@ -90,6 +90,9 @@ import tvb.datatypes.arrays as arrays
 from tvb.simulator.common import get_logger
 LOG = get_logger(__name__)
 
+from .history import SparseHistory
+from .common import astr, map_astr, simple_gen_astr
+
 
 class Coupling(core.Type):
     r"""
@@ -120,40 +123,11 @@ class Coupling(core.Type):
     .. automethod:: PreSigmoidal.__call__
 
     """
-    _base_classes = ["Coupling"]
+    _base_classes = ["Coupling", 'SparseCoupling']
 
-    def __init__(self, **kwargs):
-        """
-        Initialize the model with parameters as keywords arguments, a sensible
-        default parameter set should be provided via the trait mechanism.
-
-        """
-        super(Coupling, self).__init__(**kwargs)
-        LOG.debug(str(kwargs))
-
-
-    def configure(self):
-        """  """
-        super(Coupling, self).configure()
-
-
-    def __repr__(self):
-        """A formal, executable, representation of a Coupling object."""
-        class_name = self.__class__.__name__
-        traited_kwargs = self.trait.keys()
-        formal = class_name + "(" + "=%s, ".join(traited_kwargs) + "=%s)"
-        return formal % eval("(self." + ", self.".join(traited_kwargs) + ")")
-
-
-    def __str__(self):
-        """An informal, human readable, representation of a Coupling object."""
-        class_name = self.__class__.__name__
-        traited_kwargs = self.trait.keys()
-        informal = class_name + "(" + ", ".join(traited_kwargs) + ")"
-        return informal
-
-
-    def __call__(self, g_ij, x_i, x_j):
+    def __call__(self, step, history):
+        g_ij = history.es_weights
+        x_i, x_j = history.query(step)
         x_i = x_i[numpy.newaxis].transpose((2, 1, 0, 3)) # (to, ncv, from, m)
         pre = self.pre(x_i, x_j)
         sum = (g_ij * pre).sum(axis=2) # (to, ncv, m)
@@ -166,7 +140,35 @@ class Coupling(core.Type):
         return gx
 
 
-class Linear(Coupling):
+class SparseCoupling(Coupling):
+    """
+    A coupling implementation which takes advantage of a sparse weights structure to reduce the
+    number of coupling terms evaluated.
+
+    """
+
+    def _lri(self, nnz_row_el_idx):
+        "Flat array of indices afferent, non-zero-weight connections."
+        if not hasattr(self, '_cached_lri'):
+            rows = numpy.r_[-1, nnz_row_el_idx]
+            self._cached_lri, = numpy.argwhere(numpy.diff(rows)).T
+            self._cached_nzr = numpy.unique(nnz_row_el_idx)
+            LOG.debug('lri.size %d nzr.size %d', self._cached_lri.size, self._cached_nzr.size)
+        return self._cached_lri, self._cached_nzr
+
+    def __call__(self, step, history):
+        h = history # type: SparseHistory
+        x_i, x_j = h.query_sparse(step)
+        sum = numpy.zeros_like(x_i)
+        x_i = x_i[:, h.nnz_col_el_idx]
+        pre = self.pre(x_i, x_j)
+        assert pre.shape == (h.n_cvar, h.n_nnzw, h.n_mode)
+        weights_col = h.nnz_weights.reshape((h.n_nnzw, 1))
+        lri, nzr = self._lri(h.nnz_row_el_idx)
+        sum[:, nzr] = numpy.add.reduceat(weights_col * pre, lri, axis=1)
+        return self.post(sum)
+
+class Linear(SparseCoupling):
     r"""
     Provides a linear coupling function of the following form
 
@@ -193,8 +195,10 @@ class Linear(Coupling):
     def post(self, gx):
         return self.a * gx + self.b
 
+    def __str__(self):
+        return simple_gen_astr(self, 'a b')
 
-class Scaling(Coupling):
+class Scaling(SparseCoupling):
     r"""
     Provides a simple scaling of the connectivity of the form
 
@@ -213,8 +217,11 @@ class Scaling(Coupling):
     def post(self, gx):
         return self.a * gx
 
+    def __str__(self):
+        return simple_gen_astr(self, 'a')
 
-class HyperbolicTangent(Coupling):
+
+class HyperbolicTangent(SparseCoupling):
     r"""
     Provides a sigmoidal coupling function of the form
 
@@ -256,6 +263,9 @@ class HyperbolicTangent(Coupling):
 
     def pre(self, x_i, x_j):
         return self.a * (1 +  numpy.tanh((self.b * x_j - self.midpoint) / self.sigma))
+
+    def __str__(self):
+        return simple_gen_astr(self, 'a b midpoint sigma')
 
 
 class Sigmoidal(Coupling):
@@ -307,11 +317,14 @@ class Sigmoidal(Coupling):
         doc="Standard deviation of the sigmoidal",
         order=5)
 
+    def __str__(self):
+        return simple_gen_astr(self, 'cmin cmax midpoint a sigma')
+
     def post(self, gx):
         return self.cmin + ((self.cmax - self.cmin) / (1.0 + numpy.exp(-self.a *((gx - self.midpoint) / self.sigma))))
 
 
-class SigmoidalJansenRit(Sigmoidal):
+class SigmoidalJansenRit(Coupling):
     r"""
     Provides a sigmoidal coupling function as described in the 
     Jansen and Rit model, of the following form
@@ -358,9 +371,12 @@ class SigmoidalJansenRit(Sigmoidal):
         doc="Scaling of the coupling term",
         order=5)
 
+    def __str__(self):
+        return simple_gen_astr(self, 'cmin cmax midpoint a r')
+
     def pre(self, x_i, x_j):
-        return self.cmax / (1.0 + numpy.exp(
-          self.r * (self.midpoint - (x_j[:, 0] - x_j[:, 1]))))
+        pre = self.cmax / (1.0 + numpy.exp(self.r * (self.midpoint - (x_j[:, 0] - x_j[:, 1]))))
+        return pre[:, numpy.newaxis]
 
     def post(self, gx):
         return self.a * gx
@@ -426,6 +442,9 @@ class PreSigmoidal(Coupling):
         doc="Use global threshold (otherwise local).",
         order=7)
 
+    def __str__(self):
+        return simple_gen_astr(self, 'H Q G P theta dynamic globalT')
+
     def configure(self):
         """Set the right indirect call."""
         super(PreSigmoidal, self).configure()
@@ -433,7 +452,9 @@ class PreSigmoidal(Coupling):
 
     # override __call__ directly simpler than pre/post form
     # TODO check use of arrays dims here
-    def __call__(self, g_ij, x_i, x_j, na=numpy.newaxis):
+    def __call__(self, step, history, na=numpy.newaxis):
+        g_ij = history.es_weights
+        x_i, x_j = history.query(step)
         if self.dynamic:
             _ = (self.P * x_j[:,0] - x_j[:,1,self.sliceT])[:,na]
         else:
@@ -449,7 +470,7 @@ class PreSigmoidal(Coupling):
             return (g_ij.transpose((2, 1, 0, 3)) * A_j).sum(axis=0)
 
 
-class Difference(Coupling):
+class Difference(SparseCoupling):
     r"""
     Provides a difference coupling function, between pre and post synaptic
     activity of the form
@@ -467,6 +488,9 @@ class Difference(Coupling):
         doc="Rescales the connection strength.",
         order=1)
 
+    def __str__(self):
+        return simple_gen_astr(self, 'a')
+
     def pre(self, x_i, x_j):
         return x_j - x_i
 
@@ -474,7 +498,7 @@ class Difference(Coupling):
         return self.a * gx
 
 
-class Kuramoto(Coupling):
+class Kuramoto(SparseCoupling):
     r"""
     Provides a Kuramoto-style coupling, a periodic difference of the form
     
@@ -490,6 +514,9 @@ class Kuramoto(Coupling):
         range=basic.Range(lo=0.0, hi=1.0, step=0.01),
         doc="Rescales the connection strength.",
         order=1)
+
+    def __str__(self):
+        return simple_gen_astr(self, 'a')
 
     def pre(self, x_i, x_j):
         return numpy.sin(x_j - x_i)

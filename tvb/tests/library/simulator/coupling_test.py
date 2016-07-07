@@ -35,16 +35,17 @@ Test for tvb.simulator.coupling module
 
 """
 
-if __name__ == "__main__":
+if True or __name__ == "__main__":
     from tvb.tests.library import setup_test_console_env
     setup_test_console_env()
 
+import copy
 import numpy
 import unittest
 from tvb.tests.library.base_testcase import BaseTestCase
-from tvb.simulator import coupling
-
-
+from tvb.simulator import coupling, models, simulator
+from tvb.datatypes import cortex, connectivity
+from tvb.simulator.history import SparseHistory
 
 class CouplingTest(BaseTestCase):
     """
@@ -61,15 +62,19 @@ class CouplingTest(BaseTestCase):
     delayed_state_1sv = numpy.ones((2, 1, 2, 1))        # nodes, state_variables, nodes, modes
     delayed_state_2sv = numpy.ones((2, 2, 2, 1))
 
+    weights2d = weights[:, 0, :, 0]
+    history_1sv = SparseHistory(weights2d, weights2d*0, numpy.r_[0], 1)
+    history_2sv = SparseHistory(weights2d, weights2d*0, numpy.r_[0, 1], 1)
+
 
     def _apply_coupling(self, k):
         k.configure()
-        k(self.weights, self.state_1sv, self.delayed_state_1sv)
+        k(0, self.history_1sv)
 
 
     def _apply_coupling_2sv(self, k):
         k.configure()
-        k(self.weights, self.state_2sv, self.delayed_state_2sv)
+        k(0, self.history_2sv)
 
 
     def test_difference_coupling(self):
@@ -139,6 +144,38 @@ class CouplingTest(BaseTestCase):
         self._apply_coupling_2sv(k)
 
 
+class CouplingShapeTest(BaseTestCase):
+
+    def test_shape(self):
+
+        # try to avoid introspector picking up this model
+        Gen2D = copy.deepcopy(models.Generic2dOscillator)
+
+        class CouplingShapeTestModel(Gen2D):
+            def __init__(self, test_case=None, n_node=None, **kwds):
+                super(CouplingShapeTestModel, self).__init__(**kwds)
+                self.cvar = numpy.r_[0, 1]
+                self.n_node = n_node
+                self.test_case = test_case
+
+            def dfun(self, state, coupling, local_coupling):
+                if self.test_case is not None:
+                    self.test_case.assertEqual(
+                        (2, self.n_node, 1),
+                        coupling.shape
+                    )
+                    return state
+
+        surf = cortex.Cortex(load_default=True)
+        sim = simulator.Simulator(
+            model=CouplingShapeTestModel(self, surf.vertices.shape[0]),
+            connectivity=connectivity.Connectivity(load_default=True),
+            surface=surf)
+
+        sim.configure()
+
+        for _ in sim(simulation_length=sim.integrator.dt * 2):
+            pass
 
 def suite():
     """
@@ -146,6 +183,7 @@ def suite():
     """
     test_suite = unittest.TestSuite()
     test_suite.addTest(unittest.makeSuite(CouplingTest))
+    test_suite.addTest(unittest.makeSuite(CouplingShapeTest))
     return test_suite
 
 

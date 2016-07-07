@@ -42,8 +42,7 @@ if __name__ == "__main__":
 import unittest
 import sys
 import numpy
-import tvb.datatypes.surfaces_data as surfaces_data
-import tvb.datatypes.surfaces as surfaces
+from tvb.datatypes import surfaces
 from tvb.tests.library.base_testcase import BaseTestCase
 
 
@@ -55,7 +54,7 @@ class SurfacesTest(BaseTestCase):
 
     def test_surface(self):
         dt = surfaces.Surface()
-        dt.vertices = numpy.array(range(30)).reshape(10, 3)
+        dt.vertices = numpy.array(range(30)).reshape(10, 3).astype(numpy.float64)
         dt.triangles = numpy.array(range(9)).reshape(3, 3)
         dt.configure()
         summary_info = dt.summary_info
@@ -86,7 +85,7 @@ class SurfacesTest(BaseTestCase):
         self.assertEqual(summary_info['Number of edges'], 49140)
         self.assertEqual(summary_info['Number of triangles'], 32760)
         self.assertEqual(summary_info['Number of vertices'], 16384)
-        self.assertEqual(dt.surface_type, surfaces_data.CORTICAL)
+        self.assertEqual(dt.surface_type, surfaces.CORTICAL)
         self.assertEqual(len(dt.vertex_neighbours), 16384)
         self.assertTrue(isinstance(dt.vertex_neighbours[0], frozenset))
         self.assertEqual(len(dt.vertex_triangles), 16384)
@@ -96,8 +95,8 @@ class SurfacesTest(BaseTestCase):
         self.assertEqual(dt.triangle_angles.shape, (32760, 3))
         self.assertEqual(len(dt.edges), 49140)
         self.assertTrue(abs(dt.edge_length_mean - 3.97605292887) < 0.00000001)
-        self.assertTrue(abs(dt.edge_length_min - 0.663807567201) < 0.00000001)
-        self.assertTrue(abs(dt.edge_length_max - 7.75671853782) < 0.00000001)
+        self.assertTrue(abs(dt.edge_length_min - 0.6638) < 0.0001)
+        self.assertTrue(abs(dt.edge_length_max - 7.7567) < 0.0001)
         self.assertEqual(len(dt.edge_triangles), 49140)
         self.assertEqual([], dt.validate_topology_for_simulations().warnings)
         self.assertEqual(dt.get_data_shape('vertices'), (16384, 3))
@@ -110,7 +109,7 @@ class SurfacesTest(BaseTestCase):
 
     def test_cortical_topology_pyramid(self):
         dt = surfaces.Surface()
-        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]).astype(numpy.float64)
         dt.triangles = numpy.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
         dt.configure()
 
@@ -123,7 +122,7 @@ class SurfacesTest(BaseTestCase):
 
     def test_cortical_topology_isolated_vertex(self):
         dt = surfaces.Surface()
-        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 2]])
+        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 2]]).astype(numpy.float64)
         dt.triangles = numpy.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
         dt.configure()
 
@@ -136,7 +135,7 @@ class SurfacesTest(BaseTestCase):
 
     def test_cortical_topology_pinched(self):
         dt = surfaces.Surface()
-        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]).astype(numpy.float64)
         dt.triangles = numpy.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3], [1, 2, 3]])
         dt.configure()
 
@@ -149,7 +148,7 @@ class SurfacesTest(BaseTestCase):
 
     def test_cortical_topology_hole(self):
         dt = surfaces.Surface()
-        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        dt.vertices = numpy.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]).astype(numpy.float64)
         dt.triangles = numpy.array([[0, 2, 1], [0, 1, 3], [0, 3, 2]])
         dt.configure()
 
@@ -187,17 +186,17 @@ class SurfacesTest(BaseTestCase):
     def test_eegcap(self):
         dt = surfaces.EEGCap(load_default=True)
         self.assertTrue(isinstance(dt, surfaces.EEGCap))
-        self.assertEqual(dt.get_data_shape('vertices'), (4096, 3))
-        self.assertEqual(dt.get_data_shape('vertex_normals'), (4096, 3))
-        self.assertEqual(dt.get_data_shape('triangles'), (7062, 3))
+        self.assertEqual(dt.get_data_shape('vertices'), (1082, 3))
+        self.assertEqual(dt.get_data_shape('vertex_normals'), (1082, 3))
+        self.assertEqual(dt.get_data_shape('triangles'), (2160, 3))
 
 
     def test_facesurface(self):
         dt = surfaces.FaceSurface(load_default=True)
         self.assertTrue(isinstance(dt, surfaces.FaceSurface))
-        self.assertEqual(dt.get_data_shape('vertices'), (35613, 3))
-        self.assertEqual(dt.get_data_shape('vertex_normals'), (35613, 3))
-        self.assertEqual(dt.get_data_shape('triangles'), (10452, 3))
+        self.assertEqual(dt.get_data_shape('vertices'), (8614, 3))
+        self.assertEqual(dt.get_data_shape('vertex_normals'), (0,))
+        self.assertEqual(dt.get_data_shape('triangles'), (17224, 3))
 
 
     def test_regionmapping(self):

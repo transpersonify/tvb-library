@@ -47,10 +47,10 @@ class VersionSettings(object):
     """
 
     # Current release number
-    BASE_VERSION = "1.4.1"
+    BASE_VERSION = "1.5"
 
     # Current DB version. Increment this and create a new xxx_update_db.py migrate script
-    DB_STRUCTURE_VERSION = 15
+    DB_STRUCTURE_VERSION = 17
 
     # This is the version of the data stored in H5 and XML files
     # and should be used by next versions to know how to import
@@ -232,7 +232,9 @@ class WebSettings(object):
                                              'tools.encode.encoding': 'utf-8',
                                              'tools.decode.on': True,
                                              'tools.gzip.on': True,
-                                             # 'tools.gzip.mime_types': ['text/*'],
+                                             'tools.gzip.mime_types': ['text/html', 'text/plain',
+                                                                       'text/javascript', 'text/css',
+                                                                       'application/x.ndarray'],
                                              'tools.sessions.on': True,
                                              'tools.sessions.storage_type': 'ram',
                                              'tools.sessions.timeout': 600,  # 10 hours
@@ -256,10 +258,6 @@ class WebSettings(object):
                                                                                             'templates', 'genshi',
                                                                                             'visualizers'),
                                                         },
-                                       '/schema': {'tools.staticdir.root': self.CURRENT_DIR,
-                                                   'tools.staticdir.on': True,
-                                                   'tools.staticdir.dir': os.path.join('core', 'schema'),
-                                                   },
                                        }
 
 

@@ -65,71 +65,31 @@ class TraitedInterfaceGenerator(object):
         if not obj.trait.bound:
             return {}
 
-        label = get(obj.trait.inits.kwd, 'label', obj.trait.name)
-        if not label:
-            label = obj.trait.name
-        intr = {'default': (obj.value or obj.trait.value) if hasattr(obj, 'value') else obj.trait.value,
-                'description': get(obj.trait.inits.kwd, 'doc'),
-                'label': self.label(label),
-                'name': obj.trait.name,
-                'locked': obj.trait.inits.kwd.get('locked', False),
-                'required': obj.trait.inits.kwd.get('required', True)}
+        intr = {}
+        self.__fill_basics(obj, intr)
+        self.__fill_ranges(obj, intr)
+        self.__fill_noiseconfig(obj, intr)
+        self.__fill_filters(obj, intr)
 
-        range_value = obj.trait.inits.kwd.get('range', False)
-        if range_value:
-            intr['minValue'] = range_value.lo
-            intr['maxValue'] = range_value.hi
-            if range_value.step is not None:
-                intr['stepValue'] = range_value.step
-            else:
-                LOG.debug("Missing Range.step field for attribute %s, we will consider a default." % obj.trait.name)
-                intr['stepValue'] = (range_value.hi - range_value.hi) / 10
-            
-        noise_configurable = obj.trait.inits.kwd.get('configurable_noise', None)
-        if noise_configurable is not None:
-            intr['configurableNoise'] = noise_configurable
-
-        if KWARG_FILTERS_UI in obj.trait.inits.kwd:
-            intr[KWARG_FILTERS_UI] = json.dumps([ui_filter.to_dict() for ui_filter in
-                                                 obj.trait.inits.kwd[KWARG_FILTERS_UI]])
-        if KWARG_FILTERS_BACKEND in obj.trait.inits.kwd:
-            intr["conditions"] = obj.trait.inits.kwd[KWARG_FILTERS_BACKEND]
-
-        if hasattr(obj, 'dtype'):
-            intr['elementType'] = getattr(obj, 'dtype')
-
-        if get(obj.trait, 'wraps', False):
-            if isinstance(obj.trait.wraps, tuple):
-                intr['type'] = str(obj.trait.wraps[0].__name__)
-            else:
-                intr['type'] = str(obj.trait.wraps.__name__)
+        if obj.trait.wraps is not None:
+            self.__fill_wrapped_type(obj, intr)
 
             if intr['type'] == 'dict' and isinstance(intr['default'], dict):
                 intr['attributes'], intr['elementType'] = self.__prepare_dictionary(intr['default'])
-                if len(intr['attributes']) < 1:
+                if len(intr['attributes']) == 0:
                     ## Dictionary without any sub-parameter
                     return {}
 
-        ##### ARRAY specific processing ########################################
-        if 'Array' in [str(i.__name__) for i in ownr.mro()]:
-            intr['type'] = 'array'
-            intr['elementType'] = str(inst.dtype)
-            intr['quantifier'] = 'manual'
-            if obj.trait.value is not None and isinstance(obj.trait.value, numpy.ndarray):
-                # Make sure arrays are displayed in a compatible form: [1, 2, 3]
-                intr['default'] = str(obj.trait.value.tolist())
+        mro_type_names = [i.__name__ for i in ownr.mro()]
 
+        if 'Array' in mro_type_names:
+            self.__fill_array(obj, inst, intr)
         ##### TYPE & subclasses specifics ######################################
-        elif ('Type' in [str(i.__name__) for i in ownr.mro()]
-              and (obj.__module__ != 'tvb.basic.traits.types_basic'
-                   or 'Range' in [str(i.__name__) for i in ownr.mro()])
-              or 'Enumerate' in [str(i.__name__) for i in ownr.mro()]):
+        elif ('Type' in mro_type_names
+              and (obj.__module__ != 'tvb.basic.traits.types_basic' or 'Range' in mro_type_names)
+              or 'Enumerate' in mro_type_names):
 
-            # Populate Attributes for current entity
-            attrs = sorted(getattr(obj, 'trait').values(), key=lambda entity: entity.trait.order_number)
-            attrs = [val.interface for val in attrs if val.trait.order_number >= 0]
-            attrs = [attr for attr in attrs if attr is not None and len(attr) > 0]
-            intr['attributes'] = attrs
+            self.__fill_entity_attributes(obj, intr)
 
             if obj.trait.bound == INTERFACE_ATTRIBUTES_ONLY:
                 # We need to do this, to avoid infinite loop on attributes 
@@ -141,57 +101,115 @@ class TraitedInterfaceGenerator(object):
             else:
                 intr['type'] = 'select'
 
-            ##### MAPPED_TYPE specifics ############################################
-            if 'MappedType' in [str(i.__name__) for i in ownr.mro()]:
-                intr['datatype'] = True
-                #### For simple DataTypes, cut options and attributes
-                intr['options'] = []
-                if not ownr._ui_complex_datatype:
-                    intr['attributes'] = []
-                    ownr_class = ownr.__class__
-                else:
-                    ownr_class = ownr._ui_complex_datatype
-                if 'MetaType' in ownr_class.__name__:
-                    ownr_class = ownr().__class__
-                intr['type'] = ownr_class.__module__ + '.' + ownr_class.__name__
-
+            if 'MappedType' in mro_type_names:
+                self.__fill_mapped_type(ownr, intr)
             else:
-        ##### TYPE (not MAPPED_TYPE) again ####################################
+            ##### TYPE (not MAPPED_TYPE) again ####################################
                 intr['attributes'] = []
                 # Build options list
                 intr['options'] = []
                 if 'Enumerate' in obj.__class__.__name__:
-                    for val in obj.trait.options:
-                        intr['options'].append({'name': val,
-                                                'value': val})
-                    intr['default'] = obj.trait.value
+                    self.__fill_enumerate(obj, intr)
                     return intr
                 else:
-                    for opt in TYPE_REGISTER.subclasses(ownr, KWARG_AVOID_SUBCLASSES in obj.trait.inits.kwd):
-                        if hasattr(obj, 'value') and obj.value is not None and isinstance(obj.value, opt):
-                            ## fill option currently selected with attributes from instance
-                            opt = obj.value
-                            opt_class = opt.__class__
-                        else:
-                            opt_class = opt
-                        opt.trait.bound = INTERFACE_ATTRIBUTES_ONLY
+                    self.__handle_nonmapped_subtypes(ownr, obj, intr)
 
-                        description = multiline_math_directives_to_matjax(opt_class.__doc__)
-
-                        intr['options'].append({'name': get(opt, '_ui_name', opt_class.__name__),
-                                                'value': str_class_name(opt_class, short_form=True),
-                                                'class': str_class_name(opt_class, short_form=False),
-                                                'description': description,
-                                                'attributes': opt.interface['attributes']})
-
-            if intr['default'] is not None and intr['default'].__class__:
-                intr['default'] = str(intr['default'].__class__.__name__)
-                if intr['default'] == 'RandomState':
-                    intr['default'] = 'RandomStream'
-            else:
-                intr['default'] = None
+            self.__correct_defaults(intr)
 
         return intr
+
+
+    @staticmethod
+    def __fill_basics(obj, intr):
+        label = get(obj.trait.inits.kwd, 'label', obj.trait.name)
+        if not label:
+            label = obj.trait.name
+        intr.update({
+            'default': (obj.value or obj.trait.value) if hasattr(obj, 'value') else obj.trait.value,
+            'description': get(obj.trait.inits.kwd, 'doc'),
+            'label': label.capitalize(),
+            'name': obj.trait.name,
+            'locked': obj.trait.inits.kwd.get('locked', False),
+            'required': obj.trait.inits.kwd.get('required', True)
+        })
+
+
+    @staticmethod
+    def __fill_ranges(obj, intr):
+        range_value = obj.trait.inits.kwd.get('range', False)
+        if range_value:
+            intr['minValue'] = range_value.lo
+            intr['maxValue'] = range_value.hi
+            if range_value.step is not None:
+                intr['stepValue'] = range_value.step
+            else:
+                LOG.debug("Missing Range.step field for attribute %s, we will consider a default." % obj.trait.name)
+                intr['stepValue'] = (range_value.hi - range_value.hi) / 10
+
+
+    @staticmethod
+    def __fill_noiseconfig(obj, intr):
+        noise_configurable = obj.trait.inits.kwd.get('configurable_noise', None)
+        if noise_configurable is not None:
+            intr['configurableNoise'] = noise_configurable
+
+
+    @staticmethod
+    def __fill_filters(obj, intr):
+        if KWARG_FILTERS_UI in obj.trait.inits.kwd:
+            intr[KWARG_FILTERS_UI] = json.dumps([ui_filter.to_dict() for ui_filter in
+                                                 obj.trait.inits.kwd[KWARG_FILTERS_UI]])
+        if KWARG_FILTERS_BACKEND in obj.trait.inits.kwd:
+            intr["conditions"] = obj.trait.inits.kwd[KWARG_FILTERS_BACKEND]
+
+
+    @staticmethod
+    def __fill_wrapped_type(obj, intr):
+        if isinstance(obj.trait.wraps, tuple):
+            intr['type'] = obj.trait.wraps[0].__name__
+        else:
+            intr['type'] = obj.trait.wraps.__name__
+
+
+    @staticmethod
+    def __fill_array(obj, inst, intr):
+        intr['type'] = 'array'
+        intr['elementType'] = str(inst.dtype)
+        if isinstance(obj.trait.value, numpy.ndarray):
+            # Make sure arrays are displayed in a compatible form: [1, 2, 3]
+            intr['default'] = str(obj.trait.value.tolist())
+
+
+    @staticmethod
+    def __fill_entity_attributes(obj, intr):
+        # Populate Attributes for current entity
+        attrs = sorted(obj.trait.values(), key=lambda entity: entity.trait.order_number)
+        attrs = [val.interface for val in attrs if val.trait.order_number >= 0]
+        attrs = [attr for attr in attrs if attr is not None and len(attr) > 0]
+        intr['attributes'] = attrs
+
+
+    @staticmethod
+    def __fill_mapped_type(ownr, intr):
+        intr['datatype'] = True
+        #### For simple DataTypes, cut options and attributes
+        intr['options'] = []
+        if not ownr._ui_complex_datatype:
+            intr['attributes'] = []
+            ownr_class = ownr.__class__
+        else:
+            ownr_class = ownr._ui_complex_datatype
+        if 'MetaType' in ownr_class.__name__:
+            ownr_class = ownr().__class__
+        intr['type'] = ownr_class.__module__ + '.' + ownr_class.__name__
+
+
+    @staticmethod
+    def __fill_enumerate(obj, intr):
+        for val in obj.trait.options:
+            intr['options'].append({'name': val,
+                                    'value': val})
+        intr['default'] = obj.trait.value
 
 
     def __prepare_dictionary(self, dictionary):
@@ -205,12 +223,12 @@ class TraitedInterfaceGenerator(object):
             value = dictionary[key]
             entry['label'] = key
             entry['name'] = key
-            if type(value).__name__ == 'dict':
+            if type(value) == dict:
                 entry['attributes'], entry['elementType'] = self.__prepare_dictionary(value)
                 value = ''
             entry['default'] = str(value)
 
-            if hasattr(value, 'tolist') or 'Array' in [str(i.__name__) for i in type(value).mro()]:
+            if hasattr(value, 'tolist') or 'Array' in [i.__name__ for i in type(value).mro()]:
                 entry['type'] = 'array'
                 if not hasattr(value, 'tolist'):
                     entry['default'] = str(value.trait.value)
@@ -222,20 +240,40 @@ class TraitedInterfaceGenerator(object):
         return result, element_type
 
 
+    @staticmethod
+    def __handle_nonmapped_subtypes(ownr, obj, intr):
+        """ Populate options for each subtype. This fills in models etc"""
+        for opt in TYPE_REGISTER.subclasses(ownr, KWARG_AVOID_SUBCLASSES in obj.trait.inits.kwd):
+            if hasattr(obj, 'value') and obj.value is not None and isinstance(obj.value, opt):
+                ## fill option currently selected with attributes from instance
+                opt = obj.value
+                opt_class = opt.__class__
+            else:
+                opt_class = opt
+            opt.trait.bound = INTERFACE_ATTRIBUTES_ONLY
+
+            description = multiline_math_directives_to_matjax(opt_class.__doc__)
+
+            intr['options'].append({'name': get(opt, '_ui_name', opt_class.__name__),
+                                    'value': str_class_name(opt_class, short_form=True),
+                                    'class': str_class_name(opt_class, short_form=False),
+                                    'description': description,
+                                    'attributes': opt.interface['attributes']})
+
+
+    @staticmethod
+    def __correct_defaults(intr):
+        if intr['default'] is not None:
+            intr['default'] = intr['default'].__class__.__name__
+            if intr['default'] == 'RandomState':
+                intr['default'] = 'RandomStream'
+        else:
+            intr['default'] = None
+
+
     def __set__(self, inst, val):
         """
         Given a hierarchical dictionary of the kind generated by __get__, with the 
         chosen options, we should be able to fully instantiate a class.
         """
         raise NotImplementedError
-
-
-    @staticmethod
-    def label(text):
-        """
-        Create suitable UI label given text.
-        Enforce starts with upper-case.
-        """
-        return text[0].upper() + text[1:]
-    
-

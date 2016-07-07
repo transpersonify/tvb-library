@@ -51,6 +51,7 @@ from tvb.tests.library.base_testcase import BaseTestCase
 from tvb.datatypes import connectivity
 from tvb.datatypes.cortex import Cortex
 from tvb.datatypes.region_mapping import RegionMapping
+from tvb.datatypes.sensors import SensorsInternal
 
 
 LOG = get_logger(__name__)
@@ -153,9 +154,9 @@ class SubcorticalProjectionTest(BaseTestCase):
             noise=noise.Additive(nsig=numpy.array([2 ** -10, ]))
         )
         mons = (
-            monitors.EEG.from_file('eeg-brainstorm-65.txt', 'projection_EEG_surface.npy', period=self.period),
-            monitors.MEG.from_file('meg-brainstorm-276.txt', 'projection_MEG_surface.npy', period=self.period),
-            monitors.iEEG.from_file('SEEG_588.txt', 'projection_SEEG_surface.npy', period=self.period),
+            monitors.EEG.from_file('eeg_brainstorm_65.txt', 'projection_eeg_65_surface_16k.npy', period=self.period),
+            monitors.MEG.from_file('meg_brainstorm_276.txt', 'projection_meg_276_surface_16k.npy', period=self.period),
+            monitors.iEEG.from_file('seeg_588.txt', 'projection_seeg_588_surface_16k.npy', period=self.period),
         )
         local_coupling_strength = numpy.array([2 ** -10])
         region_mapping = RegionMapping.from_file('regionMapping_16k_%d.txt' % (self.n_regions, ))
@@ -175,8 +176,7 @@ class SubcorticalProjectionTest(BaseTestCase):
         for mon in self.sim.monitors:
             self.assertEqual(mon.period, self.period)
             n_sens, g_n_node = mon.gain.shape
-            _, _, h_n_node, _ = self.sim.history.shape
-            self.assertEqual(g_n_node, h_n_node)
+            self.assertEqual(g_n_node, self.sim.number_of_nodes)
             self.assertEqual(n_sens, mon.sensors.number_of_sensors)
             self.assertEqual(lc_n_node, g_n_node)
 
@@ -197,6 +197,24 @@ class SubcorticalProjectionTest(BaseTestCase):
     def tearDown(self):
         # gc sim so multiple test suites don't hog memory
         del self.sim
+
+
+class AllAnalyticWithSubcortical(BaseTestCase):
+    "Test correct gain matrix shape for all analytic with subcortical nodes."
+    def setUp(self):
+        self.sim = simulator.Simulator(
+            connectivity=connectivity.Connectivity.from_file('connectivity_192.zip'),
+            monitors=(monitors.iEEG(
+                sensors=SensorsInternal(load_default=True),
+                region_mapping=RegionMapping.from_file('regionMapping_16k_192.txt')
+            ))
+        ).configure()
+
+    def test_gain_size(self):
+        ieeg = self.sim.monitors[0] # type: SensorsInternal
+        n_sens, n_reg = ieeg.gain.shape
+        self.assertEqual(ieeg.sensors.locations.shape[0], n_sens)
+        self.assertEqual(self.sim.connectivity.number_of_regions, n_reg)
 
 
 class NoSubCorticalProjection(SubcorticalProjectionTest):

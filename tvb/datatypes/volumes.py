@@ -36,71 +36,26 @@ methods that are associated with the volume datatypes.
 
 """
 
-import tvb.datatypes.volumes_scientific as volumes_scientific
-import tvb.datatypes.volumes_framework as volumes_framework
 from tvb.basic.logger.builder import get_logger
+from tvb.basic.traits import types_basic as basic, types_mapped
+from tvb.datatypes import arrays
+
 
 LOG = get_logger(__name__)
 
 
-class Volume(volumes_scientific.VolumeScientific, volumes_framework.VolumeFramework):
+class Volume(types_mapped.MappedType):
     """
-    This class brings together the scientific and framework methods that are
-    associated with the Volume dataType.
-    
-    ::
-        
-                             VolumeData
-                                 |
-                                / \\
-                 VolumeFramework   VolumeScientific
-                                \ /
-                                 |
-                              Volume
-        
-    
-    """
-    pass
+    Data defined on a regular grid in three dimensions.
 
-
-class ParcellationMask(volumes_scientific.ParcellationMaskScientific, 
-                       volumes_framework.ParcellationMaskFramework):
     """
-    This class brings together the scientific and framework methods that are
-    associated with the ParcellationMask datatype.
-    
-    ::
-        
-                         ParcellationMaskData
-                                  |
-                                 / \\
-        ParcellationMaskFramework   ParcellationMaskScientific
-                                 \ /
-                                  |
-                           ParcellationMask
-        
-    
-    """
-    pass
+    origin = arrays.PositionArray(label = "Volume origin coordinates")
+    voxel_size = arrays.FloatArray(label = "Voxel size") # need a triplet, xyz
+    voxel_unit = basic.String(label = "Voxel Measure Unit", default = "mm")
 
-
-class StructuralMRI(volumes_scientific.StructuralMRIScientific, 
-                    volumes_framework.StructuralMRIFramework):
-    """
-    This class brings together the scientific and framework methods that are
-    associated with the StructuralMRI datatype.
-    
-    ::
-        
-                         StructuralMRIData
-                                 |
-                                / \\
-          StructuralMRIFramework   StructuralMRIScientific
-                                \ /
-                                 |
-                           StructuralMRI
-        
-    
-    """
-    pass
-
+    def _find_summary_info(self):
+        summary = {"Volume type": self.__class__.__name__,
+                   "Origin": self.origin,
+                   "Voxel size": self.voxel_size,
+                   "Units": self.voxel_unit}
+        return summary

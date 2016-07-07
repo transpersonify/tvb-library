@@ -45,22 +45,16 @@ will be consistent with Monitor periods corresponding to any of [4096, 2048, 102
 
 """
 
-# From standard python libraries
-
-# Third party python libraries  
+import functools
 import numpy
-
-#The Virtual Brain
-import tvb.basic.traits.core as core
-import tvb.basic.traits.types_basic as basic
+import scipy.integrate
+from tvb.basic.traits import core, types_basic as basic
 from tvb.datatypes import arrays
+from . import noise
+from .common import get_logger, simple_gen_astr
 
-# vb simulator
-import tvb.simulator.noise
 
-from tvb.simulator.common import get_logger
 LOG = get_logger(__name__)
-
 
 
 class Integrator(core.Type):
@@ -76,12 +70,6 @@ class Integrator(core.Type):
     .. [3] R. Mannella and V. Palleschi, *Fast and precise algorithm for 
         computer simulation of stochastic differential equations*, Phys. Rev. A
         40: 3381, 1989.
-
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: Integrator.__init__
-    .. automethod:: Integrator.scheme
 
     """
     _base_classes = ['Integrator', 'IntegratorStochastic', 'RungeKutta4thOrderDeterministic']
@@ -110,27 +98,6 @@ class Integrator(core.Type):
         default = None,
         order=-1)
 
-    def __init__(self, **kwargs):
-        """Integrators are intialized using their integration step, dt."""
-        super(Integrator, self).__init__(**kwargs) 
-        LOG.debug(str(kwargs))
-
-
-    def __repr__(self):
-        """A formal, executable, representation of a Model object."""
-        class_name = self.__class__.__name__ 
-        traited_kwargs = self.trait.keys()
-        formal = class_name + "(" + "=%s, ".join(traited_kwargs) + "=%s)"
-        return formal % eval("(self." + ", self.".join(traited_kwargs) + ")")
-
-
-    def __str__(self):
-        """An informal, human readable, representation of a Model object."""
-        class_name = self.__class__.__name__ 
-        traited_kwargs = self.trait.keys()
-        informal = class_name + "(" + ", ".join(traited_kwargs) + ")"
-        return informal
-
 
     def scheme(self, X, dfun, coupling, local_coupling, stimulus):
         """
@@ -139,13 +106,15 @@ class Integrator(core.Type):
         :math:`X` and provide an appropriate :math:`X + dX` (dfun in the code).
 
         """
-
-        pass
+        msg = "Integrator is a base class; please use a suitable subclass."
+        raise NotImplementedError(msg)
 
     def clamp_state(self, X):
         if self.clamped_state_variable_values is not None:
             X[self.clamped_state_variable_indices] = self.clamped_state_variable_values
 
+    def __str__(self):
+        return simple_gen_astr(self, 'dt')
 
 class IntegratorStochastic(Integrator):
     r"""
@@ -171,33 +140,17 @@ class IntegratorStochastic(Integrator):
         .. math::
             dX_{i,j} = \frac{\partial dX_i}{\partial X_j}
 
-    .. automethod:: IntegratorStochastic.__init__
-
     """
 
-    noise = tvb.simulator.noise.Noise(
+    noise = noise.Noise(
         label = "Integration Noise",
-        default = tvb.simulator.noise.Additive,
+        default = noise.Additive,
         required = True,
         doc = """The stochastic integrator's noise source. It incorporates its
         own instance of Numpy's RandomState.""")
 
-
-    def __init__(self, **kwargs): # dt, 
-        """
-        Wisdom... and plagiarism. include :math:`g(X)` (gfun in the code), the 
-        noise function.
-
-        """
-        LOG.info("%s: initing..." % str(self))
-        super(IntegratorStochastic, self).__init__(**kwargs)
-
-
-    def configure(self):
-        """  """
-        super(IntegratorStochastic, self).configure()
-        self.noise.configure()
-
+    def __str__(self):
+        return simple_gen_astr(self, 'dt noise')
 
 
 class HeunDeterministic(Integrator):
@@ -206,26 +159,9 @@ class HeunDeterministic(Integrator):
     modified trapezoidal method, which uses the Euler method as its predictor.
     And it is also a implicit integration scheme.
 
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: HeunDeterministic.__init__
-    .. automethod:: HeunDeterministic.scheme
-
     """
 
-    def __init__(self, **kwargs):
-        """
-        Wisdom... and plagiarism.
-
-        """
-
-        LOG.info("%s: initing..." % str(self))
-
-        super(HeunDeterministic, self).__init__(**kwargs)
-
-        LOG.debug("%s: inited." % repr(self))
-
+    _ui_name = "Heun"
 
     def scheme(self, X, dfun, coupling, local_coupling, stimulus):
         r"""
@@ -250,32 +186,15 @@ class HeunDeterministic(Integrator):
         self.clamp_state(X_next)
         return X_next
 
+
 class HeunStochastic(IntegratorStochastic):
     """
     It is a simple example of a predictor-corrector method. It is also known as
     modified trapezoidal method, which uses the Euler method as its predictor.
-    And it is also a implicit integration scheme.
-
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: HeunStochastic.__init__
-    .. automethod:: HeunStochastic.scheme
 
     """
 
-    def __init__(self, **kwargs):
-        """
-        Wisdom... and plagiarism.
-
-        """
-
-        LOG.info("%s: initing..." % str(self))
-
-        super(HeunStochastic, self).__init__(**kwargs)
-
-        LOG.debug("%s: inited." % repr(self))
-
+    _ui_name = "Stochastic Heun"
 
     def scheme(self, X, dfun, coupling, local_coupling, stimulus):
         """
@@ -310,6 +229,7 @@ class HeunStochastic(IntegratorStochastic):
         self.clamp_state(X_next)
         return X_next
 
+
 class EulerDeterministic(Integrator):
     """
     It is the simplest difference methods for the initial value problem. The
@@ -317,26 +237,9 @@ class EulerDeterministic(Integrator):
     the Ito process at the discretization instants only, is the key to its
     successful implementation.
 
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: EulerDeterministic.__init__
-    .. automethod:: EulerDeterministic.scheme
-
     """
 
-    def __init__(self, **kwargs):
-        """
-        Wisdom... and plagiarism.
-
-        """
-
-        LOG.info("%s: initing..." % str(self))
-
-        super(EulerDeterministic, self).__init__(**kwargs)
-
-        LOG.debug("%s: inited." % repr(self))
-
+    _ui_name = "Euler"
 
     def scheme(self, X, dfun, coupling, local_coupling, stimulus):
         r"""
@@ -362,26 +265,9 @@ class EulerStochastic(IntegratorStochastic):
     the Ito process at the discretization instants only, is the key to its
     successful implementation.
 
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: EulerStochastic.__init__
-    .. automethod:: EulerStochastic.scheme
-
     """
 
-    def __init__(self, **kwargs):
-        """
-        Wisdom... and plagiarism.
-
-        """
-
-        LOG.info("%s: initing..." % str(self))
-
-        super(EulerStochastic, self).__init__(**kwargs)
-
-        LOG.debug("%s: inited." % repr(self))
-
+    _ui_name = "Euler-Maruyama"
 
     def scheme(self, X, dfun, coupling, local_coupling, stimulus):
         r"""
@@ -399,15 +285,8 @@ class EulerStochastic(IntegratorStochastic):
         """
 
         noise = self.noise.generate(X.shape)
-
         dX = dfun(X, coupling, local_coupling) * self.dt 
         noise_gfun = self.noise.gfun(X)
-        if (noise_gfun.shape != (1,) and noise.shape[0] != noise_gfun.shape[0]):
-            msg = str("Got shape %s for noise but require %s."
-                      " You need to reconfigure noise after you have changed your model."%(
-                       noise_gfun.shape, (noise.shape[0], noise.shape[1])))
-            raise Exception(msg)
-
         X_next = X + dX + noise_gfun * noise + self.dt * stimulus
         self.clamp_state(X_next)
         return X_next
@@ -417,30 +296,11 @@ class RungeKutta4thOrderDeterministic(Integrator):
     """
     The Runge-Kutta method is a standard procedure with most one-step methods.
 
-    .. #Currently there seems to be a clash betwen traits and autodoc, autodoc
-    .. #can't find the methods of the class, the class specific names below get
-    .. #us around this...
-    .. automethod:: RungeKutta4thOrderDeterministic.__init__
-    .. automethod:: RungeKutta4thOrderDeterministic.scheme
-
     """
 
-    def __init__(self, **kwargs):
-        """
-        Wisdom... and plagiarism.
+    _ui_name = "Runge-Kutta 4th order"
 
-        """
-
-        LOG.info("%s: initing..." % str(self))
-
-        super(RungeKutta4thOrderDeterministic, self).__init__(**kwargs)
-
-        self.you_have_been_warned = False
-
-        LOG.debug("%s: inited." % repr(self))
-
-
-    def scheme(self, X, dfun, coupling=None, local_coupling=0.0, stimulus=0.0):
+    def scheme(self, X, dfun, coupling, local_coupling=0.0, stimulus=0.0):
         r"""
         The classical 4th order Runge-Kutta method is an explicit method.
         The 4th order Runge-Kutta methods are the most commonly used,
@@ -460,18 +320,10 @@ class RungeKutta4thOrderDeterministic(Integrator):
 
         """
 
-        if (not self.you_have_been_warned) and (coupling != None):
-            msg = "%s: Does NOT support coupling. Just to check local dynamics"
-            LOG.warning(msg%str(self))
-            self.you_have_been_warned = True
-
-        coupling = numpy.zeros(X.shape)
-
         dt = self.dt
         dt2 = dt / 2.0
         dt6 = dt / 6.0
-        #import pdb; pdb.set_trace()
-        #todo clamp these
+
         k1 = dfun(X, coupling, local_coupling)
         inter_k1 = X + dt2 * k1
         self.clamp_state(inter_k1)
@@ -501,6 +353,8 @@ class Identity(Integrator):
 
     """
 
+    _ui_name = "Difference equation"
+
     def scheme(self, X, dfun, coupling=None, local_coupling=0.0, stimulus=0.0):
         """
         The identity scheme simply returns the results of the dfun and
@@ -512,3 +366,72 @@ class Identity(Integrator):
         """
 
         return dfun(X, coupling, local_coupling) + stimulus
+
+
+class SciPyODEBase(object):
+    "Provides a base class for integrators using SciPy's ode class."
+
+    def _dfun_wrapper(self, dfun, state_shape):
+        @functools.wraps(dfun)
+        def wrapper(t, X_, coupling=None, local_coupling=0.0):
+            X = X_.reshape(state_shape)
+            dXdt = dfun(X, coupling, local_coupling)
+            return dXdt.ravel()
+        return wrapper
+
+    def _prepare_ode(self, X, dfun):
+        ode = scipy.integrate.ode(self._dfun_wrapper(dfun, X.shape))
+        ode.set_initial_value(X.ravel())
+        ode.set_integrator(self._scipy_ode_integrator_name,
+                           first_step=self.dt / 5.0)
+        LOG.debug('prepped backing SciPy ODE integrator %r', ode)
+        return ode
+
+    _ode = None
+
+    def _apply_ode(self, X, dfun, coupling, local_coupling, stimulus):
+        if self._ode is None:
+            self._ode = self._prepare_ode(X, dfun)
+        self._ode.y[:] = X.ravel()
+        self._ode.set_f_params(coupling, local_coupling)
+        return self._ode.integrate(self._ode.t + self.dt).reshape(X.shape) + self.dt * stimulus
+
+
+class SciPyODE(SciPyODEBase):
+
+    def scheme(self, X, dfun, coupling, local_coupling, stimulus):
+        X_next = self._apply_ode(X, dfun, coupling, local_coupling, stimulus)
+        self.clamp_state(X_next)
+        return X_next
+
+class SciPySDE(SciPyODEBase):
+
+    def scheme(self, X, dfun, coupling, local_coupling, stimulus):
+        X_next = self._apply_ode(X, dfun, coupling, local_coupling, stimulus)
+        X_next += self.noise.gfun(X) * self.noise.generate(X.shape)
+        self.clamp_state(X_next)
+        return X_next
+
+class VODE(SciPyODE, Integrator):
+    _scipy_ode_integrator_name = "vode"
+    _ui_name = "Variable-order Adams / BDF"
+
+class VODEStochastic(SciPySDE, IntegratorStochastic):
+    _scipy_ode_integrator_name = "vode"
+    _ui_name = "Stochastic variable-order Adams / BDF"
+
+class Dopri5(SciPyODE, Integrator):
+    _scipy_ode_integrator_name = "dopri5"
+    _ui_name = "Dormand-Prince, order (4, 5)"
+
+class Dopri5Stochastic(SciPySDE, IntegratorStochastic):
+    _scipy_ode_integrator_name = "dopri5"
+    _ui_name = "Stochastic Dormand-Prince, order (4, 5)"
+
+class Dop853(SciPyODE, Integrator):
+    _scipy_ode_integrator_name = "dop853"
+    _ui_name = "Dormand-Prince, order 8 (5, 3)"
+
+class Dop853Stochastic(SciPySDE, IntegratorStochastic):
+    _scipy_ode_integrator_name = "dop853"
+    _ui_name = "Stochastic Dormand-Prince, order 8 (5, 3)"
